@@ -1,5 +1,9 @@
 import ctypes
+import errno
 from ctypes import wintypes
+
+from dcb import DCB
+
 
 class Xmodem:
     GENERIC_READ = 0x80000000
@@ -12,6 +16,7 @@ class Xmodem:
     NAK = 0x15
     EOT = 0x04
     CAN = 0x18
+    SUB = 0x1A
     BLOCK_SIZE = 128
     MAX_RETRIES = 10
 
@@ -30,6 +35,11 @@ class Xmodem:
             0,
             None
         )
+
+        if self.handle == self.INVALID_HANDLE_VALUE:
+            raise ctypes.WinError(ctypes.get_last_error())
+
+        self.configure_serial()
 
     def send_data(self, data: bytes):
         written = wintypes.DWORD()
@@ -63,10 +73,30 @@ class Xmodem:
             self.kernel.CloseHandle(self.handle)
             self.handle = None
 
+    def configure_serial(self, baudrate=9600, bytesize=8, parity=0, stopbits=1):
+        dcb = DCB()
+        dcb.DCBlength = ctypes.sizeof(dcb)
+
+        if not self.kernel.GetCommState(self.handle, ctypes.byref(dcb)):
+            raise ctypes.WinError(ctypes.get_last_error())
+
+        dcb.BaudRate = baudrate
+        dcb.ByteSize = bytesize
+        dcb.Parity = parity
+        dcb.StopBits = stopbits
+        dcb.fBinary = 1
+        dcb.fParity = 0
+        dcb.fDtrControl = 1
+        dcb.fRtsControl = 1
+
+        if not self.kernel.SetCommState(self.handle, ctypes.byref(dcb)):
+            raise ctypes.WinError(ctypes.get_last_error())
+
     def send_file(self, file_path):
         with open(file_path, "rb") as f:
             while True:
                 if self.receive_data(1) == bytes([self.NAK]):
+                    print("Received first NAK")
                     break
 
             block_num = 1
@@ -83,29 +113,94 @@ class Xmodem:
                     self.SOH,
                     block_num % 256,
                     255 - (block_num % 256),
-                ]) + data + bytes([sum(data) % 256])
-
+                ]) + data + bytes([sum(data) & 0xff])
+                print(packet)
                 for _ in range(self.MAX_RETRIES):
                     self.send_data(packet)
                     response = self.receive_data(1)
                     if response == bytes([self.ACK]):
+                        print("Received ACK")
                         block_num += 1
                         break
                     elif response == bytes([self.NAK]):
+                        print("Received NAK")
                         continue
                     else:
                         self.send_data(bytes([self.CAN]))
+                        print("Failed")
                         return False
                 else:
                     self.send_data(bytes([self.CAN]))
+                    print("Failed")
                     return False
 
             for _ in range(self.MAX_RETRIES):
                 self.send_data(bytes([self.EOT]))
                 if self.receive_data(1) == bytes([self.ACK]):
+                    print("EOT, Received ACK")
                     return True
 
             return False
 
     def receive_file(self, file_path):
-        pass
+        self.send_data(bytes([self.NAK]))
+        print("Sent NAK")
+
+        expected_block = 1
+        file_data = bytearray()
+
+        while True:
+
+            end_of_transmission = False
+            while True:
+                first_byte = self.receive_data(1)[0]
+                print(first_byte)
+
+                if first_byte == self.EOT:
+                    self.send_data(bytes([self.ACK]))
+                    print("EOT Received, Sending ACK")
+                    end_of_transmission = True
+                    break
+
+                if first_byte == self.SOH:
+                    break
+                else:
+                    print("Invalid byte Received, waiting for SOH")
+
+            if end_of_transmission:
+                break
+
+            packet = self.receive_data(self.BLOCK_SIZE + 3)
+
+            print(f"Received packet {expected_block}: {packet}")
+
+            block_num = packet[0]
+            block_inv = packet[1]
+            data = packet[2:2 + self.BLOCK_SIZE]
+            checksum = packet[self.BLOCK_SIZE + 2]
+
+            if block_num !=  (255 - block_inv):
+                self.send_data(bytes([self.NAK]))
+                print("Invalid block number received, Sending NAK")
+                continue
+
+            calc_checksum = sum(data) & 0xff
+            if calc_checksum != checksum:
+                self.send_data(bytes([self.NAK]))
+                print("Invalid checksum received, Sending NAK")
+                continue
+
+            if block_num != expected_block:
+                self.send_data(bytes([self.NAK]))
+                print("Invalid block number received, Sending NAK")
+                continue
+
+            file_data.extend(data)
+            expected_block += 1
+
+            self.send_data(bytes([self.ACK]))
+
+        file_data.rstrip(bytes(self.SUB))
+        with open(file_path, "wb") as f:
+            f.write(file_data)
+            return True

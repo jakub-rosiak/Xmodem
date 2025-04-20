@@ -1,15 +1,12 @@
 from Xmodem import Xmodem
 
-modem = Xmodem("COM5")
+modem = Xmodem("COM6")
 
 modem.create_connection()
 print("Connected")
 
-modem.send_file("./test.txt")
+modem.receive_file("./test1.txt")
 print("Sent file")
-
-response = modem.receive_data()
-print("Received: ", response)
 
 modem.close()
 print("Closed")
