@@ -117,12 +117,19 @@ class Xmodem:
                 print(packet)
                 for _ in range(self.MAX_RETRIES):
                     self.send_data(packet)
-                    response = self.receive_data(1)
-                    if response == bytes([self.ACK]):
+
+                    while True:
+                        received_data = self.receive_data(1)
+                        if received_data:
+                            break
+
+                    response = received_data[0]
+
+                    if response == self.ACK:
                         print("Received ACK")
                         block_num += 1
                         break
-                    elif response == bytes([self.NAK]):
+                    elif response == self.NAK:
                         print("Received NAK")
                         continue
                     else:
@@ -135,9 +142,10 @@ class Xmodem:
                     return False
 
             for _ in range(self.MAX_RETRIES):
+                print("EOT sent")
                 self.send_data(bytes([self.EOT]))
                 if self.receive_data(1) == bytes([self.ACK]):
-                    print("EOT, Received ACK")
+                    print("Received ACK")
                     return True
 
             return False
@@ -153,7 +161,11 @@ class Xmodem:
 
             end_of_transmission = False
             while True:
-                first_byte = self.receive_data(1)[0]
+                received_data = self.receive_data(1)
+                if not received_data:
+                    continue
+
+                first_byte = received_data[0]
                 print(first_byte)
 
                 if first_byte == self.EOT:

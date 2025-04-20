@@ -1,12 +1,63 @@
+from pathlib import Path
+import re
 from Xmodem import Xmodem
 
-modem = Xmodem("COM6")
+def main_menu():
+    print("=" * 10)
+    print("     XMODEM FILE TRANSFER")
+    print("=" * 10)
 
-modem.create_connection()
-print("Connected")
+def get_port():
+    while True:
+        choice = input("\nSelect com port: ")
 
-modem.receive_file("./test1.txt")
-print("Sent file")
+        if re.match(r'^COM\d+$', choice):
+            return choice
 
-modem.close()
-print("Closed")
+def option_menu():
+    while True:
+        print("1. Send file")
+        print("2. Receive file")
+        choice = input("\n(1, 2): ")
+
+        if choice in ["1", "2"]:
+            return choice
+
+def get_file(option):
+    while True:
+        file_path = input("\nEnter file path: ")
+
+        if option == "1" and Path(file_path).is_file():
+            return file_path
+
+        elif option == "2" and Path(file_path).parent.exists():
+            return file_path
+
+        else:
+            print("Invalid file path")
+
+
+def main():
+    main_menu()
+    port = get_port()
+    modem = Xmodem(port)
+
+    print("Attempting connection...")
+    modem.create_connection()
+    print("Connected")
+
+    option = option_menu()
+    file_name = get_file(option)
+
+    if option == "1":
+        modem.send_file(file_name)
+
+    elif option == "2":
+        modem.receive_file(file_name)
+
+    print("Closing...")
+    modem.close()
+    print("Closed")
+
+if __name__ == "__main__":
+    main()
