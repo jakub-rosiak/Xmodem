@@ -200,7 +200,7 @@ class Xmodem:
 
             self.send_data(bytes([self.ACK]))
 
-        file_data.rstrip(bytes(self.SUB))
+        file_data = bytes(file_data).rstrip(bytes([self.SUB]))
         with open(file_path, "wb") as f:
             f.write(file_data)
             return True
