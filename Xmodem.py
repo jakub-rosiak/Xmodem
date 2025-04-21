@@ -103,7 +103,6 @@ class Xmodem:
                 else:
                     crc <<= 1
                 crc &= 0xFFFF
-        print(crc)
         return crc.to_bytes(2, 'big')
 
     def send_file(self, file_path, checksum_type):
@@ -172,9 +171,14 @@ class Xmodem:
 
             return False
 
-    def receive_file(self, file_path):
-        self.send_data(bytes([self.NAK]))
-        print("Sent NAK")
+    def receive_file(self, file_path, checksum_type):
+        if checksum_type == "1":
+            self.send_data(bytes([self.NAK]))
+            print("Sent NAK")
+
+        elif checksum_type == "2":
+            self.send_data(self.C)
+            print("Sent C")
 
         expected_block = 1
         file_data = bytearray()
@@ -188,7 +192,6 @@ class Xmodem:
                     continue
 
                 first_byte = received_data[0]
-                print(first_byte)
 
                 if first_byte == self.EOT:
                     self.send_data(bytes([self.ACK]))
@@ -197,6 +200,7 @@ class Xmodem:
                     break
 
                 if first_byte == self.SOH:
+                    print("Received SOH")
                     break
                 else:
                     print("Invalid byte Received, waiting for SOH")
@@ -204,25 +208,39 @@ class Xmodem:
             if end_of_transmission:
                 break
 
-            packet = self.receive_data(self.BLOCK_SIZE + 3)
+            if checksum_type == "1":
+                packet = self.receive_data(self.BLOCK_SIZE + 3)
+            elif checksum_type == "2":
+                packet = self.receive_data(self.BLOCK_SIZE + 4)
 
             print(f"Received packet {expected_block}: {packet}")
 
             block_num = packet[0]
             block_inv = packet[1]
             data = packet[2:2 + self.BLOCK_SIZE]
-            checksum = packet[self.BLOCK_SIZE + 2]
+            checksum_start = 2 + self.BLOCK_SIZE
+            checksum_end = checksum_start + (2 if checksum_type == "2" else 1)
+            checksum = packet[checksum_start:checksum_end]
+
+            print(f"Checksum: {checksum}")
 
             if block_num !=  (255 - block_inv):
                 self.send_data(bytes([self.NAK]))
                 print("Invalid block number received, Sending NAK")
                 continue
 
-            calc_checksum = sum(data) & 0xff
-            if calc_checksum != checksum:
-                self.send_data(bytes([self.NAK]))
-                print("Invalid checksum received, Sending NAK")
-                continue
+            if checksum_type == "1":
+                calc_checksum = sum(data) & 0xff
+                if calc_checksum != checksum:
+                    self.send_data(bytes([self.NAK]))
+                    print("Invalid checksum received, Sending NAK")
+                    continue
+            elif checksum_type == "2":
+                calc_checksum = self.calculate_crc(data)
+                if calc_checksum != checksum:
+                    self.send_data(bytes([self.NAK]))
+                    print("Invalid checksum received, Sending NAK")
+                    continue
 
             if block_num != expected_block:
                 self.send_data(bytes([self.NAK]))
