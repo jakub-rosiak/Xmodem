@@ -36,6 +36,14 @@ def get_file(option):
         else:
             print("Invalid file path")
 
+def get_checksum_type():
+    while True:
+        print("Select error detection method: ")
+        print("1. Checksum")
+        print("2. CRC")
+        choice = input("\n(1, 2): ")
+        if choice in ["1", "2"]:
+            return choice
 
 def main():
     main_menu()
@@ -50,10 +58,13 @@ def main():
     file_name = get_file(option)
 
     if option == "1":
+        print("Sending file...")
         modem.send_file(file_name)
 
     elif option == "2":
-        modem.receive_file(file_name)
+        checksum_type = get_checksum_type()
+        print("Receiving file...")
+        modem.receive_file(file_name, checksum_type)
 
     print("Closing...")
     modem.close()

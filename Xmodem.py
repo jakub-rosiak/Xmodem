@@ -112,17 +112,18 @@ class Xmodem:
                 crc &= 0xFFFF
         return crc.to_bytes(2, 'big')
 
-    def send_file(self, file_path, checksum_type):
+    def send_file(self, file_path):
+        checksum_type = None
         with open(file_path, "rb") as f:
             while True:
-                if checksum_type == "1":
-                    if self.receive_data(1) == bytes([self.NAK]):
-                        print("Received first NAK")
-                        break
-                elif checksum_type == "2":
-                    if self.receive_data(1) == self.C:
-                        print("Received first C")
-                        break
+                if self.receive_data(1) == bytes([self.NAK]):
+                    checksum_type = "1"
+                    print("Received first NAK")
+                    break
+                elif self.receive_data(1) == self.C:
+                    checksum_type = "2"
+                    print("Received first C")
+                    break
             block_num = 1
 
             while True:
@@ -237,7 +238,7 @@ class Xmodem:
                     continue
 
                 if checksum_type == "1":
-                    calc_checksum = sum(data) & 0xff
+                    calc_checksum = (sum(data) & 0xff).to_bytes(1, 'little')
                     if calc_checksum != checksum:
                         self.send_data(bytes([self.NAK]))
                         print("Invalid checksum received, Sending NAK")
@@ -259,6 +260,11 @@ class Xmodem:
 
                 self.send_data(bytes([self.ACK]))
                 break
+
+            else:
+                self.send_data(bytes([self.CAN]))
+                print("Failed")
+                return False
 
             if end_of_transmission:
                 break
