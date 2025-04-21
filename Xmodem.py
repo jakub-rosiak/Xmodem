@@ -26,6 +26,13 @@ class Xmodem:
         self.kernel = ctypes.WinDLL('kernel32', use_last_error=True)
         self.handle = None
 
+    def __enter__(self):
+        self.create_connection()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+
     def create_connection(self):
         self.handle = self.kernel.CreateFileW(
             self.port,
@@ -184,75 +191,84 @@ class Xmodem:
         file_data = bytearray()
 
         while True:
-
             end_of_transmission = False
-            while True:
-                received_data = self.receive_data(1)
-                if not received_data:
+            for _ in range(self.MAX_RETRIES):
+                while True:
+                    received_data = self.receive_data(1)
+                    if not received_data:
+                        continue
+
+                    first_byte = received_data[0]
+
+                    if first_byte == self.EOT:
+                        self.send_data(bytes([self.ACK]))
+                        print("EOT Received, Sending ACK")
+                        end_of_transmission = True
+                        break
+
+                    if first_byte == self.SOH:
+                        print("Received SOH")
+                        break
+                    else:
+                        print("Invalid byte Received, waiting for SOH")
+
+                if end_of_transmission:
+                    break
+
+                if checksum_type == "1":
+                    packet = self.receive_data(self.BLOCK_SIZE + 3)
+                elif checksum_type == "2":
+                    packet = self.receive_data(self.BLOCK_SIZE + 4)
+
+                print(f"Received packet {expected_block}: {packet}")
+
+                block_num = packet[0]
+                block_inv = packet[1]
+                data = packet[2:2 + self.BLOCK_SIZE]
+                checksum_start = 2 + self.BLOCK_SIZE
+                checksum_end = checksum_start + (2 if checksum_type == "2" else 1)
+                checksum = packet[checksum_start:checksum_end]
+
+                print(f"Checksum: {checksum}")
+
+                if block_num % 256 !=  (255 - block_inv) % 256:
+                    self.send_data(bytes([self.NAK]))
+                    print("Invalid block number received, Sending NAK")
                     continue
 
-                first_byte = received_data[0]
+                if checksum_type == "1":
+                    calc_checksum = sum(data) & 0xff
+                    if calc_checksum != checksum:
+                        self.send_data(bytes([self.NAK]))
+                        print("Invalid checksum received, Sending NAK")
+                        continue
+                elif checksum_type == "2":
+                    calc_checksum = self.calculate_crc(data)
+                    if calc_checksum != checksum:
+                        self.send_data(bytes([self.NAK]))
+                        print("Invalid checksum received, Sending NAK")
+                        continue
 
-                if first_byte == self.EOT:
-                    self.send_data(bytes([self.ACK]))
-                    print("EOT Received, Sending ACK")
-                    end_of_transmission = True
-                    break
+                if block_num != expected_block % 256:
+                    self.send_data(bytes([self.NAK]))
+                    print("Invalid block number received, Sending NAK")
+                    continue
 
-                if first_byte == self.SOH:
-                    print("Received SOH")
-                    break
-                else:
-                    print("Invalid byte Received, waiting for SOH")
+                file_data.extend(data)
+                expected_block += 1
+
+                self.send_data(bytes([self.ACK]))
+                break
 
             if end_of_transmission:
                 break
 
-            if checksum_type == "1":
-                packet = self.receive_data(self.BLOCK_SIZE + 3)
-            elif checksum_type == "2":
-                packet = self.receive_data(self.BLOCK_SIZE + 4)
-
-            print(f"Received packet {expected_block}: {packet}")
-
-            block_num = packet[0]
-            block_inv = packet[1]
-            data = packet[2:2 + self.BLOCK_SIZE]
-            checksum_start = 2 + self.BLOCK_SIZE
-            checksum_end = checksum_start + (2 if checksum_type == "2" else 1)
-            checksum = packet[checksum_start:checksum_end]
-
-            print(f"Checksum: {checksum}")
-
-            if block_num !=  (255 - block_inv):
-                self.send_data(bytes([self.NAK]))
-                print("Invalid block number received, Sending NAK")
-                continue
-
-            if checksum_type == "1":
-                calc_checksum = sum(data) & 0xff
-                if calc_checksum != checksum:
-                    self.send_data(bytes([self.NAK]))
-                    print("Invalid checksum received, Sending NAK")
-                    continue
-            elif checksum_type == "2":
-                calc_checksum = self.calculate_crc(data)
-                if calc_checksum != checksum:
-                    self.send_data(bytes([self.NAK]))
-                    print("Invalid checksum received, Sending NAK")
-                    continue
-
-            if block_num != expected_block:
-                self.send_data(bytes([self.NAK]))
-                print("Invalid block number received, Sending NAK")
-                continue
-
-            file_data.extend(data)
-            expected_block += 1
-
-            self.send_data(bytes([self.ACK]))
-
         file_data = bytes(file_data).rstrip(bytes([self.SUB]))
-        with open(file_path, "wb") as f:
-            f.write(file_data)
+
+        try:
+            with open(file_path, "wb") as f:
+                f.write(file_data)
+            print(f"File written to {file_path}")
             return True
+        except Exception as e:
+            print(f"Failed to write to {file_path}: {e}")
