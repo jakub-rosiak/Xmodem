@@ -95,11 +95,11 @@ W terminalu wpisywanie znaków nie wyświetli ich na ekranie, jednak dane będą
 
 #### Wysyłanie plików z użyciem Xmodem
 
-File -> Transfer -> XMODEM -> Send...
-Teraz wybieramy plik, który chcemy wysłać
+File -> Transfer -> XMODEM -> Send...  
+Teraz wybieramy plik, który chcemy wysłać  
 
 #### Odbieranie plików z użyciem Xmodem
 
-File -> Transfer -> XMODEM -> Receive...
-Teraz wybieramy plik, który chcemy odebrać.
-Dodatkowo na samym dole okna możemy wybrać tryb sumy kontrolnej
+File -> Transfer -> XMODEM -> Receive...  
+Teraz wybieramy plik, który chcemy odebrać.  
+Dodatkowo na samym dole okna możemy wybrać tryb sumy kontrolnej  
