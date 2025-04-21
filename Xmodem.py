@@ -17,6 +17,7 @@ class Xmodem:
     EOT = 0x04
     CAN = 0x18
     SUB = 0x1A
+    C = b'C'
     BLOCK_SIZE = 128
     MAX_RETRIES = 10
 
@@ -92,13 +93,30 @@ class Xmodem:
         if not self.kernel.SetCommState(self.handle, ctypes.byref(dcb)):
             raise ctypes.WinError(ctypes.get_last_error())
 
-    def send_file(self, file_path):
+    def calculate_crc(self, data: bytes):
+        crc = 0
+        for byte in data:
+            crc ^= byte << 8
+            for _ in range(8):
+                if crc & 0x8000:
+                    crc = (crc << 1) ^ 0x1021
+                else:
+                    crc <<= 1
+                crc &= 0xFFFF
+        print(crc)
+        return crc.to_bytes(2, 'big')
+
+    def send_file(self, file_path, checksum_type):
         with open(file_path, "rb") as f:
             while True:
-                if self.receive_data(1) == bytes([self.NAK]):
-                    print("Received first NAK")
-                    break
-
+                if checksum_type == "1":
+                    if self.receive_data(1) == bytes([self.NAK]):
+                        print("Received first NAK")
+                        break
+                elif checksum_type == "2":
+                    if self.receive_data(1) == self.C:
+                        print("Received first C")
+                        break
             block_num = 1
 
             while True:
@@ -113,7 +131,11 @@ class Xmodem:
                     self.SOH,
                     block_num % 256,
                     255 - (block_num % 256),
-                ]) + data + bytes([sum(data) & 0xff])
+                ]) + data
+                if checksum_type == "1":
+                    packet += bytes([sum(data) & 0xff])
+                elif checksum_type == "2":
+                    packet += self.calculate_crc(data)
                 print(packet)
                 for _ in range(self.MAX_RETRIES):
                     self.send_data(packet)
