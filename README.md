@@ -69,7 +69,8 @@ Ten program implementuje protokół transferu plików `Xmodem` z wykorzystaniem 
 
 ### Uruchamianie
 
-Aby rozpocząć, wykonaj `python main.py`. Program poprowadzi Cię krok po kroku przez wybór portu, pliku i trybu transmisji.
+Aby rozpocząć, wykonaj `python main.py`.  
+Program poprowadzi Cię krok po kroku przez wybór portu, pliku i trybu transmisji.
 
 ---
 
@@ -79,18 +80,18 @@ Aby rozpocząć, wykonaj `python main.py`. Program poprowadzi Cię krok po kroku
 
 Link do pobrania: [com0com](https://sourceforge.net/projects/com0com/)
 
-Po zainstalowaniu należy otworzyć Windows Update i przejść do:
-Aktualizacje opcjonalne -> Aktualizacje sterowników -> Vyacheslav Frolov - Ports
-Instalujemy sterownik i uruchamiamy ponownie system
-Teraz w aplikacji Setup od com0com możemy utworzyć nowy wirtualny port szeregowy
+Po zainstalowaniu należy otworzyć Windows Update i przejść do:  
+Aktualizacje opcjonalne -> Aktualizacje sterowników -> Vyacheslav Frolov - Ports  
+Instalujemy sterownik i uruchamiamy ponownie system  
+Teraz w aplikacji Setup od com0com możemy utworzyć nowy wirtualny port szeregowy  
 
 ### Jak używać `Tera Term`?
 
 Link do pobrania: [Tera Term](https://github.com/TeraTermProject/teraterm/releases)
 
-Po uruchomieniu programu otworzy się okno terminala oraz okno tworzenia połączenia.
-Wybieramy Serial oraz port, do którego chcemy się połączyć.
-W terminalu wpisywanie znaków nie wyświetli ich na ekranie, jednak dane będą przesyłane.
+Po uruchomieniu programu otworzy się okno terminala oraz okno tworzenia połączenia.  
+Wybieramy Serial oraz port, do którego chcemy się połączyć.  
+W terminalu wpisywanie znaków nie wyświetli ich na ekranie, jednak dane będą przesyłane.  
 
 #### Wysyłanie plików z użyciem Xmodem
 
