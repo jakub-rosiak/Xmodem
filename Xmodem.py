@@ -2,6 +2,7 @@ import ctypes
 import errno
 from ctypes import wintypes
 
+from commtimeouts import COMMTIMEOUTS
 from dcb import DCB
 
 
@@ -81,7 +82,7 @@ class Xmodem:
             self.kernel.CloseHandle(self.handle)
             self.handle = None
 
-    def configure_serial(self, baudrate=9600, bytesize=8, parity=0, stopbits=1):
+    def configure_serial(self, baudrate=9600, bytesize=8, parity=0, stopbits=1, read_interval=50, read_total_timeout_constant=10000, read_total_timeout_multiplier=0):
         dcb = DCB()
         dcb.DCBlength = ctypes.sizeof(dcb)
 
@@ -98,6 +99,16 @@ class Xmodem:
         dcb.fRtsControl = 1
 
         if not self.kernel.SetCommState(self.handle, ctypes.byref(dcb)):
+            raise ctypes.WinError(ctypes.get_last_error())
+
+        timeouts = COMMTIMEOUTS()
+        timeouts.ReadIntervalTimeout = read_interval
+        timeouts.ReadTotalTimeoutConstant = read_total_timeout_constant
+        timeouts.ReadTotalTimeoutMultiplier = read_total_timeout_multiplier
+        timeouts.WriteTotalTimeoutConstant = 1000
+        timeouts.WriteTotalTimeoutMultiplier = 10
+        print("Set timeouts")
+        if not self.kernel.SetCommTimeouts(self.handle, ctypes.byref(timeouts)):
             raise ctypes.WinError(ctypes.get_last_error())
 
     def calculate_crc(self, data: bytes):
@@ -180,41 +191,57 @@ class Xmodem:
             return False
 
     def receive_file(self, file_path, checksum_type):
-        if checksum_type == "1":
-            self.send_data(bytes([self.NAK]))
-            print("Sent NAK")
+        first_byte = None
+        for i in range(6):
+            if checksum_type == "1":
+                self.send_data(bytes([self.NAK]))
+                print(f"Sent NAK ({i+1}/6)")
 
-        elif checksum_type == "2":
-            self.send_data(self.C)
-            print("Sent C")
+            elif checksum_type == "2":
+                self.send_data(self.C)
+                print(f"Sent C ({i+1}/6)")
 
+            response = self.receive_data(1)
+            if response:
+                first_byte = response[0]
+                if first_byte == self.SOH:
+                    print("Received SOH")
+                    break
+
+        if first_byte != self.SOH:
+            print("Failed to receive SOH after 6 tries, aborting.")
+            return False
         expected_block = 1
         file_data = bytearray()
 
         while True:
             end_of_transmission = False
             for _ in range(self.MAX_RETRIES):
-                while True:
-                    received_data = self.receive_data(1)
-                    if not received_data:
-                        continue
+                if first_byte is None:
+                    while True:
+                        received_data = self.receive_data(1)
+                        if not received_data:
+                            print("didn't receive data")
+                            continue
 
-                    first_byte = received_data[0]
+                        first_byte = received_data[0]
 
-                    if first_byte == self.EOT:
-                        self.send_data(bytes([self.ACK]))
-                        print("EOT Received, Sending ACK")
-                        end_of_transmission = True
-                        break
+                        if first_byte == self.EOT:
+                            self.send_data(bytes([self.ACK]))
+                            print("EOT Received, Sending ACK")
+                            end_of_transmission = True
+                            break
 
-                    if first_byte == self.SOH:
-                        print("Received SOH")
-                        break
-                    else:
-                        print("Invalid byte Received, waiting for SOH")
+                        if first_byte == self.SOH:
+                            print("Received SOH")
+                            break
+                        else:
+                            print("Invalid byte Received, waiting for SOH")
 
                 if end_of_transmission:
                     break
+
+                first_byte = None
 
                 if checksum_type == "1":
                     packet = self.receive_data(self.BLOCK_SIZE + 3)
