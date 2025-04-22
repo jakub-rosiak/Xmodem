@@ -36,6 +36,9 @@ class Xmodem:
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
 
+    def __del__(self):
+        self.close()
+
     def create_connection(self):
         self.handle = self.kernel.CreateFileW(
             self.port,
@@ -145,7 +148,7 @@ class Xmodem:
                     break
 
                 if len(data) < self.BLOCK_SIZE:
-                    data += b'\x1A' * (self.BLOCK_SIZE - len(data))
+                    data += self.SUB * (self.BLOCK_SIZE - len(data))
 
                 packet = bytes([
                     self.SOH,
@@ -249,6 +252,8 @@ class Xmodem:
                     packet = self.receive_data(self.BLOCK_SIZE + 3)
                 elif checksum_type == CheckMode.CRC:
                     packet = self.receive_data(self.BLOCK_SIZE + 4)
+                else:
+                    raise ValueError("Unknown ")
 
                 print(f"Received packet {expected_block}: {packet}")
 
