@@ -1,6 +1,6 @@
 from pathlib import Path
 import re
-from Xmodem import Xmodem
+from Xmodem import Xmodem, CheckMode
 
 def main_menu():
     print("=" * 10)
@@ -42,8 +42,10 @@ def get_checksum_type():
         print("1. Checksum")
         print("2. CRC")
         choice = input("\n(1, 2): ")
-        if choice in ["1", "2"]:
-            return choice
+        if choice == "1":
+            return CheckMode.Checksum
+        elif choice == "2":
+            return CheckMode.CRC
 
 def main():
     main_menu()

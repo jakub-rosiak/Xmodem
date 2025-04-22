@@ -1,11 +1,13 @@
 import ctypes
-import errno
 from ctypes import wintypes
+from enum import Enum
 
 from commtimeouts import COMMTIMEOUTS
 from dcb import DCB
 
-
+class CheckMode(Enum):
+    Checksum = "checksum"
+    CRC = "crc"
 class Xmodem:
     GENERIC_READ = 0x80000000
     GENERIC_WRITE = 0x40000000
@@ -124,15 +126,15 @@ class Xmodem:
         return crc.to_bytes(2, 'big')
 
     def send_file(self, file_path):
-        checksum_type = None
         with open(file_path, "rb") as f:
             while True:
-                if self.receive_data(1) == bytes([self.NAK]):
-                    checksum_type = "1"
+                byte = self.receive_data(1)
+                if byte == bytes([self.NAK]):
+                    checksum_type = CheckMode.Checksum
                     print("Received first NAK")
                     break
-                elif self.receive_data(1) == self.C:
-                    checksum_type = "2"
+                elif byte == self.C:
+                    checksum_type = CheckMode.CRC
                     print("Received first C")
                     break
             block_num = 1
@@ -150,9 +152,9 @@ class Xmodem:
                     block_num % 256,
                     255 - (block_num % 256),
                 ]) + data
-                if checksum_type == "1":
+                if checksum_type == CheckMode.Checksum:
                     packet += bytes([sum(data) & 0xff])
-                elif checksum_type == "2":
+                elif checksum_type == CheckMode.CRC:
                     packet += self.calculate_crc(data)
                 print(packet)
                 for _ in range(self.MAX_RETRIES):
@@ -193,11 +195,11 @@ class Xmodem:
     def receive_file(self, file_path, checksum_type):
         first_byte = None
         for i in range(6):
-            if checksum_type == "1":
+            if checksum_type == CheckMode.Checksum:
                 self.send_data(bytes([self.NAK]))
                 print(f"Sent NAK ({i+1}/6)")
 
-            elif checksum_type == "2":
+            elif checksum_type == CheckMode.CRC:
                 self.send_data(self.C)
                 print(f"Sent C ({i+1}/6)")
 
@@ -243,9 +245,9 @@ class Xmodem:
 
                 first_byte = None
 
-                if checksum_type == "1":
+                if checksum_type == CheckMode.Checksum:
                     packet = self.receive_data(self.BLOCK_SIZE + 3)
-                elif checksum_type == "2":
+                elif checksum_type == CheckMode.CRC:
                     packet = self.receive_data(self.BLOCK_SIZE + 4)
 
                 print(f"Received packet {expected_block}: {packet}")
@@ -254,7 +256,7 @@ class Xmodem:
                 block_inv = packet[1]
                 data = packet[2:2 + self.BLOCK_SIZE]
                 checksum_start = 2 + self.BLOCK_SIZE
-                checksum_end = checksum_start + (2 if checksum_type == "2" else 1)
+                checksum_end = checksum_start + (2 if checksum_type == CheckMode.CRC else 1)
                 checksum = packet[checksum_start:checksum_end]
 
                 print(f"Checksum: {checksum}")
@@ -264,13 +266,13 @@ class Xmodem:
                     print("Invalid block number received, Sending NAK")
                     continue
 
-                if checksum_type == "1":
+                if checksum_type == CheckMode.Checksum:
                     calc_checksum = (sum(data) & 0xff).to_bytes(1, 'little')
                     if calc_checksum != checksum:
                         self.send_data(bytes([self.NAK]))
                         print("Invalid checksum received, Sending NAK")
                         continue
-                elif checksum_type == "2":
+                elif checksum_type == CheckMode.CRC:
                     calc_checksum = self.calculate_crc(data)
                     if calc_checksum != checksum:
                         self.send_data(bytes([self.NAK]))
