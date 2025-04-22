@@ -8,6 +8,21 @@ from dcb import DCB
 class CheckMode(Enum):
     Checksum = "checksum"
     CRC = "crc"
+
+
+def calculate_crc(data: bytes) -> bytes:
+    crc = 0
+    for byte in data:
+        crc ^= byte << 8
+        for _ in range(8):
+            if crc & 0x8000:
+                crc = (crc << 1) ^ 0x1021
+            else:
+                crc <<= 1
+            crc &= 0xFFFF
+    return crc.to_bytes(2, 'big')
+
+
 class Xmodem:
     GENERIC_READ = 0x80000000
     GENERIC_WRITE = 0x40000000
@@ -23,6 +38,7 @@ class Xmodem:
     C = b'C'
     BLOCK_SIZE = 128
     MAX_RETRIES = 10
+    MAX_RECEIVE_RETRIES = 6
 
     def __init__(self, port):
         self.port = f"\\\\.\\{port}"
@@ -55,7 +71,7 @@ class Xmodem:
 
         self.configure_serial()
 
-    def send_data(self, data: bytes):
+    def send_data(self, data: bytes) -> wintypes.DWORD:
         written = wintypes.DWORD()
         success = self.kernel.WriteFile(
             self.handle,
@@ -68,7 +84,7 @@ class Xmodem:
             raise ctypes.WinError(ctypes.get_last_error())
         return written
 
-    def receive_data(self, buffer_size: int = 128):
+    def receive_data(self, buffer_size: int = 128) -> bytes:
         buffer = ctypes.create_string_buffer(buffer_size)
         read = wintypes.DWORD()
         success = self.kernel.ReadFile(
@@ -116,21 +132,9 @@ class Xmodem:
         if not self.kernel.SetCommTimeouts(self.handle, ctypes.byref(timeouts)):
             raise ctypes.WinError(ctypes.get_last_error())
 
-    def calculate_crc(self, data: bytes):
-        crc = 0
-        for byte in data:
-            crc ^= byte << 8
-            for _ in range(8):
-                if crc & 0x8000:
-                    crc = (crc << 1) ^ 0x1021
-                else:
-                    crc <<= 1
-                crc &= 0xFFFF
-        return crc.to_bytes(2, 'big')
-
-    def send_file(self, file_path):
+    def send_file(self, file_path: str) -> bool:
         with open(file_path, "rb") as f:
-            while True:
+            for i in range(self.MAX_RECEIVE_RETRIES):
                 byte = self.receive_data(1)
                 if byte == bytes([self.NAK]):
                     checksum_type = CheckMode.Checksum
@@ -140,6 +144,14 @@ class Xmodem:
                     checksum_type = CheckMode.CRC
                     print("Received first C")
                     break
+                else:
+                    print("Didn't receive start transmission request, aborting...")
+                    return False
+
+            if checksum_type not in (CheckMode.Checksum, CheckMode.CRC):
+                self.send_data(bytes([self.CAN]))
+                raise ValueError("Unknown error checking type, aborting...")
+
             block_num = 1
 
             while True:
@@ -148,7 +160,7 @@ class Xmodem:
                     break
 
                 if len(data) < self.BLOCK_SIZE:
-                    data += self.SUB * (self.BLOCK_SIZE - len(data))
+                    data += bytes([self.SUB]) * (self.BLOCK_SIZE - len(data))
 
                 packet = bytes([
                     self.SOH,
@@ -158,15 +170,15 @@ class Xmodem:
                 if checksum_type == CheckMode.Checksum:
                     packet += bytes([sum(data) & 0xff])
                 elif checksum_type == CheckMode.CRC:
-                    packet += self.calculate_crc(data)
-                print(packet)
+                    packet += calculate_crc(data)
+
+                print(f'Sending packet {block_num}: {packet}')
                 for _ in range(self.MAX_RETRIES):
                     self.send_data(packet)
 
-                    while True:
-                        received_data = self.receive_data(1)
-                        if received_data:
-                            break
+                    received_data = self.receive_data(1)
+                    if not received_data:
+                        continue
 
                     response = received_data[0]
 
@@ -174,13 +186,9 @@ class Xmodem:
                         print("Received ACK")
                         block_num += 1
                         break
-                    elif response == self.NAK:
+                    else:
                         print("Received NAK")
                         continue
-                    else:
-                        self.send_data(bytes([self.CAN]))
-                        print("Failed")
-                        return False
                 else:
                     self.send_data(bytes([self.CAN]))
                     print("Failed")
@@ -195,16 +203,18 @@ class Xmodem:
 
             return False
 
-    def receive_file(self, file_path, checksum_type):
+    def receive_file(self, file_path: str, checksum_type: CheckMode) -> bool:
+        if checksum_type not in (CheckMode.Checksum, CheckMode.CRC):
+            self.send_data(bytes([self.CAN]))
+            raise ValueError("Unknown error checking type, aborting...")
         first_byte = None
-        for i in range(6):
+        for i in range(self.MAX_RECEIVE_RETRIES):
             if checksum_type == CheckMode.Checksum:
                 self.send_data(bytes([self.NAK]))
-                print(f"Sent NAK ({i+1}/6)")
-
+                print(f"Sent NAK ({i+1}/{self.MAX_RECEIVE_RETRIES})")
             elif checksum_type == CheckMode.CRC:
                 self.send_data(self.C)
-                print(f"Sent C ({i+1}/6)")
+                print(f"Sent C ({i+1}/{self.MAX_RECEIVE_RETRIES})")
 
             response = self.receive_data(1)
             if response:
@@ -214,7 +224,7 @@ class Xmodem:
                     break
 
         if first_byte != self.SOH:
-            print("Failed to receive SOH after 6 tries, aborting.")
+            print(f"Failed to receive SOH after {self.MAX_RECEIVE_RETRIES} tries, aborting.")
             return False
         expected_block = 1
         file_data = bytearray()
@@ -223,10 +233,10 @@ class Xmodem:
             end_of_transmission = False
             for _ in range(self.MAX_RETRIES):
                 if first_byte is None:
-                    while True:
+                    for _ in range(self.MAX_RECEIVE_RETRIES):
                         received_data = self.receive_data(1)
                         if not received_data:
-                            print("didn't receive data")
+                            print("Didn't receive any data")
                             continue
 
                         first_byte = received_data[0]
@@ -237,23 +247,27 @@ class Xmodem:
                             end_of_transmission = True
                             break
 
-                        if first_byte == self.SOH:
+                        elif first_byte == self.SOH:
                             print("Received SOH")
                             break
+
                         else:
                             print("Invalid byte Received, waiting for SOH")
+                    else:
+                        self.send_data(bytes([self.CAN]))
+                        print("Connection failed, aborting...")
+                        return False
 
                 if end_of_transmission:
                     break
 
                 first_byte = None
 
+                packet = None
                 if checksum_type == CheckMode.Checksum:
                     packet = self.receive_data(self.BLOCK_SIZE + 3)
                 elif checksum_type == CheckMode.CRC:
                     packet = self.receive_data(self.BLOCK_SIZE + 4)
-                else:
-                    raise ValueError("Unknown ")
 
                 print(f"Received packet {expected_block}: {packet}")
 
@@ -261,7 +275,12 @@ class Xmodem:
                 block_inv = packet[1]
                 data = packet[2:2 + self.BLOCK_SIZE]
                 checksum_start = 2 + self.BLOCK_SIZE
-                checksum_end = checksum_start + (2 if checksum_type == CheckMode.CRC else 1)
+                checksum_end = None
+                if checksum_type == CheckMode.Checksum:
+                    checksum_end = checksum_start + 1
+                elif checksum_type == CheckMode.CRC:
+                    checksum_end = checksum_start + 2
+
                 checksum = packet[checksum_start:checksum_end]
 
                 print(f"Checksum: {checksum}")
@@ -278,7 +297,7 @@ class Xmodem:
                         print("Invalid checksum received, Sending NAK")
                         continue
                 elif checksum_type == CheckMode.CRC:
-                    calc_checksum = self.calculate_crc(data)
+                    calc_checksum = calculate_crc(data)
                     if calc_checksum != checksum:
                         self.send_data(bytes([self.NAK]))
                         print("Invalid checksum received, Sending NAK")
@@ -297,7 +316,7 @@ class Xmodem:
 
             else:
                 self.send_data(bytes([self.CAN]))
-                print("Failed")
+                print("Connection failed, aborting...")
                 return False
 
             if end_of_transmission:
@@ -312,3 +331,4 @@ class Xmodem:
             return True
         except Exception as e:
             print(f"Failed to write to {file_path}: {e}")
+            return False
